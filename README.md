@@ -24,4 +24,10 @@ config.json中配置监听端口、监听地址
 
 传输使用aes加密，秘钥为登录时服务端向客户端分发，期间不可修改
 
+## 关于作者
+
+作者[宽宽2007](kuankuan2007.gitee.io "作者主页")
+
+本项目在[简易聊天软件: 使用长轮询的，中心化消息软件 (gitee.com)](https://gitee.com/kuankuan2007/simple-chat-software/)上开源
+
 
