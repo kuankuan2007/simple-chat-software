@@ -10,6 +10,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 import requests
 import base64
+import longPolling.client
 def encrypt(pwd, key):
     pwd = pwd.encode('utf-8')
     key = key.encode('utf-8')
@@ -26,12 +27,7 @@ def decrypt(word, key):
     a = a.decode('utf-8', 'ignore')
     return a
 def close():
-    closeLog=logging.getLogger(f'close')
-    try:
-        requests.post("http://%s:%d/logout/%s"%user)
-        closeLog.info("try closing connection")
-    except:
-        pass
+    connection.logout()
 dateFormater="%Y-%m-%d %H:%M:%S"
 logFormater="[%(asctime)s] [%(name)s] [%(threadName)s] [Line%(lineno)d] [%(levelname)s]: %(message)s"
 logging.basicConfig(level=logging.DEBUG,format=logFormater,datefmt=dateFormater)
@@ -43,6 +39,40 @@ try:
 except BaseException as err:
     LauncherLog.critical("Could not load config.json %s:%s"%(err.__class__.__name__,str(err)))
     os._exit(-1)
+def receive(data:bytes):
+    try:
+        retsult=json.loads(data.decode("utf-8"))
+    except:
+        return
+    history.insert(0,Message(retsult["otherId"],"in",retsult["time"],retsult["message"]))
+    reDraw(1)
+def send():
+    sendLog=logging.Logger("send")
+    message=sendEntry.get()
+    otherId=aimEntry.get()
+    if not message:
+        sendLog.info("empty message")
+        return
+    if not otherId:
+        sendLog.info("empty aim")
+        return
+    
+    if not connection.id:
+        sendLog.info("key is unknown")
+        return
+    obj={
+        "message":message,
+        "user":otherId,
+        "time":time.time()
+    }
+    sendLog.debug("try sending to servers")
+    connection.send(json.dumps(obj).encode())
+    sendLog.info("successfully send message to%s\n%s"%(obj["user"],obj["message"]))
+    resetEntry(sendEntry,"")
+    resetEntry(aimEntry,"")
+    history.insert(0,Message(otherId,"out",obj["time"],message))
+    reDraw(1)
+connection=longPolling.client.BothwayClient("http://%s:%d"%(config["host"],config["port"]),receive)
 def connect():
     global user,key
     connectLog = logging.getLogger('connect')
@@ -61,66 +91,19 @@ def connect():
             continue
         connectLog.info("connect for login [%s]"%tempuser)
         try:
-            retsult=requests.post("http://%s:%d/login/"%(config["host"],config["port"]),json={"user":tempuser})
+            retsult=connection.login(tempuser)
         except BaseException as err:
-
             connectLog.warning("connect err %s:%s"%(err.__class__.__name__,str(err)))
             messagebox.showerror("连接错误","无法连接至服务器")
             continue
-        if retsult.status_code!=200:
-            connectLog.warning("connection died [%d]"%retsult.status_code)
-            messagebox.showerror("连接错误","无法连接至服务器")
-            continue
-        try:
-            retsult=json.loads(retsult.content.decode("utf-8"))
-        except:
-            connectLog.warning("wrong anwser")
-            messagebox.showerror("数据错误","服务器返回了错误的数据")
-            continue
-        if retsult["code"]==1:
-            user=tempuser
-            key=retsult["key"]
-            mainScreen.title(user+" - 客户端")
-            lastEmpty=True
-            while True:
-                obj={
-                    "lastEmpty":lastEmpty
-                }
-                try:
-                    connectLog.info("start next request")
-                    retsult=requests.post("http://%s:%d/receive/%s"%(config["host"],config["port"],user),json=obj,timeout=30)
-                    lastEmpty=False
-                except requests.Timeout:
-                    connectLog.info("request timeOut")
-                except BaseException as err:
-                    connectLog.critical("request error %s:%s"%(err.__class__.__name__,str(err)))
-                else:
-                    if retsult.status_code!=200:
-                        connectLog.critical("request staus error %d"%(retsult.status_code))
-                    try:
-                        retsult=json.loads(retsult.content.decode("utf-8") )
-                    except BaseException as err:
-                        connectLog.critical("result decode error %s:%s"%(err.__class__.__name__,str(err)))
-                    else:
-                        if retsult.get("code")==1:
-                            connectLog.info("receive a message")
-                            try:
-                                retsult["message"]=decrypt(retsult["message"],key)
-                                retsult["message"]=retsult["message"][:retsult["message"].rfind("$")]
-                            except:
-                                connectLog.info("key error")
-                                retsult["message"]="[KEY ERROR]"+retsult["message"]
-                            history.insert(0,Message(retsult["otherId"],"in",retsult["time"],retsult["message"]))
-                            reDraw(1)
-                            lastEmpty=False
-        else:
+        if not retsult:
             connectLog.info("username was used")
             messagebox.showinfo("用户错误","用户名已被使用或无法被识别")
+        else:
+            break
     tempWin.destroy()
+    mainScreen.title(str(connection.id)+" - 客户端")
     
-
-
-
 LauncherLog.info("start connect thread")
 threading.Thread(target=connect,daemon=True).start()
 
@@ -217,54 +200,8 @@ def reDraw(page):
 
 reDraw(1)
 
-def send():
-    sendLog=logging.Logger("send")
-    message=sendEntry.get()
-    otherId=aimEntry.get()
-    if not message:
-        sendLog.info("empty message")
-        return
-    if not otherId:
-        sendLog.info("empty aim")
-        return
-    
-    if not key:
-        sendLog.info("key is unknown")
-        return
-    obj={
-        "message":encrypt(message+"$",key),
-        "user":otherId,
-        "time":time.time()
-    }
-    sendLog.debug("try sending to servers")
-    try:
-        retsult=requests.post("http://%s:%d/send/%s"%(config["host"],config["port"],user),json=obj)
-    except BaseException as err:
-        sendLog.error("send fail,%s:%s"%(err.__class__.__name__,str(err)))
-        messagebox.showerror("发送失败","连接服务器出错，请重试")
-        return
-    try:
-        retsult=json.loads(retsult.content.decode("utf-8"))
-    except:
-        sendLog.error("wrong answer")
-        messagebox.showerror("发送失败","服务器返回不可识别")
-    if retsult.get("code")==1:
-        sendLog.info("successfully send message to%s\n%s"%(obj["user"],obj["message"]))
-        resetEntry(sendEntry,"")
-        resetEntry(aimEntry,"")
-        history.insert(0,Message(otherId,"out",obj["time"],message))
-        reDraw(1)
-    else:
-        if retsult.get("becauseOf")=="user":
-            sendLog.info("user not found")
-            messagebox.showinfo("发送失败","用户不存在")
-        else:
-            sendLog.info("return code error")
-            messagebox.showerror("发送失败","服务器未能发送消息，请重试")
 
 
-
-    
 
 
 sendBox=tkinter.Frame(mainScreen)
