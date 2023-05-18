@@ -6,26 +6,7 @@ import os
 import time
 import math
 import threading
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
-import requests
-import base64
 import longPolling.client
-def encrypt(pwd, key):
-    pwd = pwd.encode('utf-8')
-    key = key.encode('utf-8')
-    cryptos = AES.new(key, AES.MODE_ECB)
-    msg = cryptos.encrypt(pad(pwd, 16))
-    msg = base64.b64encode(msg)
-    msg=msg.decode('utf-8',"target")
-    return msg
-def decrypt(word, key):
-    word = base64.b64decode(word)
-    key = key.encode("utf-8")
-    cipher = AES.new(key, AES.MODE_ECB)
-    a = cipher.decrypt(word)
-    a = a.decode('utf-8', 'ignore')
-    return a
 def close():
     connection.logout()
 dateFormater="%Y-%m-%d %H:%M:%S"
